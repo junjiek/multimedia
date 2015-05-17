@@ -10,37 +10,25 @@ public class ImageSearcher {
     private static int resultNum = 30;
     private ArrayList<String> imageFile, queryFile;
     private ArrayList<double[]> imgBins, queryBins;
-    private double calL2(double[] p, double [] q) {
-        double sum = 0;
-        for (int i = 0; i < p.length; i++) {
-            sum += (p[i] - q[i]) * (p[i] - q[i]);
-        }
-        return Math.sqrt(sum);
-    }
-    
-    private double calHI(double[] p, double[] q) {
-        double sum1 = 0, sum2 = 0;
-        for (int i = 0; i < p.length; i++) {
-            sum1 += Math.min(p[i], q[i]);
-            sum2 += q[i];
-        }
-        return 1 - sum1/sum2;
-    }
+    private int[] partition = new int[3];
+    private int binsNum;
 
-    private double calBh(double[] p, double[] q) {
-        double sum = 0;
-        for (int i = 0; i < p.length; i++) {
-            sum += Math.sqrt(p[i] * q[i]);
+    public void buildImgHistogram(String allImgFilename, int binsNum) {
+        this.binsNum = binsNum;
+        if (binsNum == 16) {
+            partition[0] = 2;
+            partition[1] = 4;
+            partition[2] = 2;
+        } else if (binsNum == 128) {
+            partition[0] = 4;
+            partition[1] = 8;
+            partition[2] = 4;
+        } else {
+            System.out.println(binsNum + "is not supported. Please use 16 or 128 only.");
+            return;
         }
-        double tmp = 1 - sum;
-        return tmp > 0 ? Math.sqrt(tmp) : 0;
-    }
-
-    private void readFiles(String allImgFilename, String queryFilename) {
         imageFile = new ArrayList<String>();
-        queryFile = new ArrayList<String>();
         BufferedReader reader = null;
-        
         try {
             reader = new BufferedReader(new InputStreamReader(new FileInputStream(allImgFilename)));
         } catch (FileNotFoundException e) {
@@ -59,13 +47,22 @@ public class ImageSearcher {
         } catch (IOException e) {
             e.printStackTrace();
         }
+        imgBins = new ArrayList<double[]>();
+        for (int i = 0; i < imageFile.size(); i++) {
+            imgBins.add(calImageBins(imageFile.get(i)));
+        }
+    }
+
+    private void readQuery(String queryFilename) {
+        queryFile = new ArrayList<String>();
+        BufferedReader reader = null;
 
         try {
             reader = new BufferedReader(new InputStreamReader(new FileInputStream(queryFilename)));
         } catch (FileNotFoundException e) {
             e.printStackTrace();
         }
-        line = null;
+        String line = null;
         try {
             while((line = reader.readLine()) != null) {
                 if(line.trim().isEmpty()) {
@@ -80,7 +77,7 @@ public class ImageSearcher {
         }
     }
 
-    private double[] calImageBins(String filename, int binsNum, int[] partition) {
+    private double[] calImageBins(String filename) {
         File file = new File(filename);
         BufferedImage img = null;
         try {
@@ -112,29 +109,44 @@ public class ImageSearcher {
         return bins;
     }
 
-    public void calHistogram(int binsNum) {
-        int [] partition = new int[3];
-        if (binsNum == 16) {
-            partition[0] = 2;
-            partition[1] = 4;
-            partition[2] = 2;
-        } else if (binsNum == 128) {
-            partition[0] = 4;
-            partition[1] = 8;
-            partition[2] = 4;
-        } else {
-            System.out.println(binsNum + "is not supported. Please use 16 or 128 only.");
-            return;
+    private double calL2(double[] p, double [] q) {
+        double sum = 0;
+        for (int i = 0; i < p.length; i++) {
+            sum += (p[i] - q[i]) * (p[i] - q[i]);
         }
-        imgBins = new ArrayList<double[]>();
-        queryBins = new ArrayList<double[]>();
-        for (int i = 0; i < imageFile.size(); i++) {
-            imgBins.add(calImageBins(imageFile.get(i), binsNum, partition));
-        }
-        for (int i = 0; i < queryFile.size(); i++) {
-            queryBins.add(calImageBins(queryFile.get(i), binsNum, partition));
-        }
+        return Math.sqrt(sum);
     }
+    
+    private double calHI(double[] p, double[] q) {
+        double sum1 = 0, sum2 = 0;
+        for (int i = 0; i < p.length; i++) {
+            sum1 += Math.min(p[i], q[i]);
+            sum2 += q[i];
+        }
+        return 1 - sum1/sum2;
+    }
+
+    private double calBh(double[] p, double[] q) {
+        double sum = 0;
+        for (int i = 0; i < p.length; i++) {
+            sum += Math.sqrt(p[i] * q[i]);
+        }
+        double tmp = 1 - sum;
+        return tmp > 0 ? Math.sqrt(tmp) : 0;
+    }
+
+    private static double calChi(double[] p, double[] q) {
+        double sum = 0;
+        for(int i = 0; i < p.length; i++) {
+            if(p[i] + q[i] != 0) {
+                sum = sum + (p[i] - q[i]) / (p[i] + q[i]) * (p[i] - q[i]);
+            }
+        }
+        return sum;
+    }
+
+
+
     class PathDistPair implements Comparable<PathDistPair> {
         String path;
         String subdir;
@@ -170,25 +182,14 @@ public class ImageSearcher {
         }
     }
 
-    private void run(int binsNum, String distType) {
+    private void searchAll(String distType) {
         int imageFileSize = imageFile.size();
         int queryFileSize = queryFile.size();
-        PathDistPair[] dist = new PathDistPair[imageFileSize];       
+               
         double[] accuracy = new double[queryFileSize];
         String resDir = outputDir + binsNum + "bins/" + distType +  "/";
         for (int i = 0; i < queryFileSize; i++) {
-            for (int j = 0; j < imageFileSize; j++) {
-                double d = Double.MAX_VALUE;
-                if (distType.equals("L2")) {
-                    d = calL2(queryBins.get(i), imgBins.get(j));
-                } else if (distType.equals("HI")) {
-                    d = calHI(queryBins.get(i), imgBins.get(j));
-                } else if (distType.equals("Bh")) {
-                    d = calBh(queryBins.get(i), imgBins.get(j));
-                }
-                dist[j] = new PathDistPair(imageFile.get(j), d);
-            }
-            Arrays.sort(dist);
+            PathDistPair[] dist = search(queryFile.get(i), distType);
             String queryImgPath = queryFile.get(i).substring(datasetDir.length());
             String subdir = queryImgPath.substring(0, queryImgPath.indexOf('/'));
             String resFilename = getResFilename(queryImgPath);
@@ -228,22 +229,44 @@ public class ImageSearcher {
         }
 
     }
-    public void search(String allImgFilename, String queryFilename, int binsNum) {
-        readFiles(allImgFilename, queryFilename);
-        System.out.println("calculating histogram for " + binsNum +  " bins");
-        calHistogram(binsNum);
-        System.out.println("calculating " + binsNum +  " bins with L2 dist");
-        run(binsNum, "L2");
-        System.out.println("calculating " + binsNum +  " bins with HI dist");
-        run(binsNum, "HI");
-        System.out.println("calculating " + binsNum +  " bins with Bh dist");
-        run(binsNum, "Bh");
+
+    public PathDistPair[] search(String queryFilePath, String distType) {
+    	double[] queryBin = calImageBins(queryFilePath);
+        PathDistPair[] dist = new PathDistPair[imageFile.size()];
+        for (int j = 0; j < imageFile.size(); j++) {
+            double d = Double.MAX_VALUE;
+            if (distType.equals("L2")) {
+                d = calL2(queryBin, imgBins.get(j));
+            } else if (distType.equals("HI")) {
+                d = calHI(queryBin, imgBins.get(j));
+            } else if (distType.equals("Bh")) {
+                d = calBh(queryBin, imgBins.get(j));
+            } else if (distType.equals("Chi")) {
+                d = calChi(queryBin, imgBins.get(j));
+            }
+            dist[j] = new PathDistPair(imageFile.get(j), d);
+        }
+        Arrays.sort(dist);
+        return dist;
+    }
+    public void runAll(String allImgFilename, String queryFilename, int binsNum) {
+        System.out.println("building dataset histogram for " + binsNum +  " bins");
+        buildImgHistogram(allImgFilename, binsNum);
+        System.out.println("calculating " + binsNum +  " bins with Euclidean dist");
+        readQuery(queryFilename);
+        searchAll("L2");
+        System.out.println("calculating " + binsNum +  " bins with Histogram Intersection dist");
+        searchAll("HI");
+        System.out.println("calculating " + binsNum +  " bins with Bhattacharyya distance");
+        searchAll("Bh");
+        System.out.println("calculating " + binsNum +  " bins with Chi-Square dist");
+        searchAll("Chi");
     }
 
     public static void main(String[] args) {
         ImageSearcher is = new ImageSearcher();
-        is.search("./AllImages.txt", "./QueryImages.txt", 16);
-        is.search("./AllImages.txt", "./QueryImages.txt", 128);
+        is.runAll("./AllImages.txt", "./QueryImages.txt", 16);
+        is.runAll("./AllImages.txt", "./QueryImages.txt", 128);
     }
 
 }
